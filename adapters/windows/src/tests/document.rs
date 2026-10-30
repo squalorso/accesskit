@@ -20,13 +20,14 @@ const WINDOW_TITLE: &str = "Document test";
 const WINDOW_ID: NodeId = NodeId(0);
 const DOCUMENT_ID: NodeId = NodeId(1);
 
-const TEXT: &str = "Title\rOne two\r";
+const TEXT: &str = "Title\rOne two\r\u{2022} A\r\u{2022} B\r";
 
 fn paragraph(style_id: i32, style_name: &str) -> ParaKind {
     ParaKind {
         style_id,
         style_name: style_name.into(),
         align: Align::Left,
+        line_spacing: "1.15".into(),
     }
 }
 
@@ -40,8 +41,10 @@ fn get_initial_state() -> TreeUpdate {
         paragraphs: vec![
             (0, paragraph(StyleId_Heading1.0, "Heading 1")),
             (6, paragraph(StyleId_Normal.0, "Normal")),
+            (14, paragraph(StyleId_BulletedList.0, "List Paragraph")),
+            (18, paragraph(StyleId_BulletedList.0, "List Paragraph")),
         ],
-        lines: vec![0, 6],
+        lines: vec![0, 6, 14, 18],
         pages: vec![0],
         words: vec![0, 6, 10],
         looks: vec![(
@@ -55,16 +58,36 @@ fn get_initial_state() -> TreeUpdate {
                 strike: None,
                 superscript: false,
                 subscript: false,
+                color: None,
+                background: None,
             },
         )],
         annotations: vec![],
-        objects: vec![Object {
-            kind: ObjectKind::Link {
-                url: "https://example.com/".into(),
+        objects: vec![
+            Object {
+                kind: ObjectKind::Link {
+                    url: "https://example.com/".into(),
+                },
+                range: 10..13,
+                children: vec![],
             },
-            range: 10..13,
-            children: vec![],
-        }],
+            Object {
+                kind: ObjectKind::List,
+                range: 14..22,
+                children: vec![
+                    Object {
+                        kind: ObjectKind::ListItem,
+                        range: 14..18,
+                        children: vec![],
+                    },
+                    Object {
+                        kind: ObjectKind::ListItem,
+                        range: 18..22,
+                        children: vec![],
+                    },
+                ],
+            },
+        ],
         boxes: vec![],
     });
     TreeUpdate {
@@ -170,6 +193,27 @@ fn link_element() -> Result<()> {
             UIA_HyperlinkControlTypeId
         );
         assert_eq!(unsafe { link.CurrentName() }?.to_string(), "two");
+        Ok(())
+    })
+}
+
+#[test]
+fn list_items_know_their_place() -> Result<()> {
+    scope(|s| {
+        let document = document(s)?;
+        let walker = unsafe { s.uia.RawViewWalker() }?;
+        let link = unsafe { walker.GetFirstChildElement(&document) }?;
+        let list = unsafe { walker.GetNextSiblingElement(&link) }?;
+        assert_eq!(unsafe { list.CurrentControlType() }?, UIA_ListControlTypeId);
+        let place = |item: &IUIAutomationElement| -> Result<(i32, i32)> {
+            let at = unsafe { item.GetCurrentPropertyValue(UIA_PositionInSetPropertyId) }?;
+            let of = unsafe { item.GetCurrentPropertyValue(UIA_SizeOfSetPropertyId) }?;
+            Ok((i32::try_from(&at)?, i32::try_from(&of)?))
+        };
+        let first = unsafe { walker.GetFirstChildElement(&list) }?;
+        assert_eq!(place(&first)?, (1, 2));
+        let last = unsafe { walker.GetLastChildElement(&list) }?;
+        assert_eq!(place(&last)?, (2, 2));
         Ok(())
     })
 }

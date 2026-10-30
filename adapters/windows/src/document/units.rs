@@ -494,6 +494,7 @@ mod tests {
             style_id: id,
             style_name: String::new(),
             align: Align::Left,
+            line_spacing: String::new(),
         };
         let look = |w| Look {
             font: "Aptos".into(),
@@ -504,6 +505,8 @@ mod tests {
             strike: None,
             superscript: false,
             subscript: false,
+            color: None,
+            background: None,
         };
         Indexed::new(TextDocumentRef::from(TextDocument {
             paragraphs: vec![(0, kind(70001)), (6, kind(70012)), (14, kind(70012))],

@@ -15,6 +15,8 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{fmt, ops::Deref, ops::Range};
 
+use crate::Color;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -52,6 +54,12 @@ pub struct Look {
     pub strike: Option<LineStyle>,
     pub superscript: bool,
     pub subscript: bool,
+    /// The text's colour as it is drawn on screen (automatic colour resolved),
+    /// if known.
+    pub color: Option<Color>,
+    /// The colour behind the text on screen: its highlight or shading, else
+    /// the page's, if known.
+    pub background: Option<Color>,
 }
 
 /// What a paragraph is.
@@ -65,6 +73,9 @@ pub struct ParaKind {
     /// The style's name, as the application shows it.
     pub style_name: String,
     pub align: Align,
+    /// The line spacing, as the application shows it (`1.15`, `At least
+    /// 12 pt`); empty if not known.
+    pub line_spacing: String,
 }
 
 /// A marked stretch of text.

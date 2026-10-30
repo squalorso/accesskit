@@ -13,7 +13,9 @@
 mod units;
 
 use accesskit::text_document::{Align, Annotation, LineStyle, ObjectKind};
-use accesskit::{Action, ActionData, ActionRequest, Affine, Point, TextPosition, TextSelection};
+use accesskit::{
+    Action, ActionData, ActionRequest, Affine, Color, Point, TextPosition, TextSelection,
+};
 use accesskit_consumer::{FullNodeId, NodeRef};
 use std::mem::ManuallyDrop;
 use std::sync::{Arc, RwLock, Weak};
@@ -292,6 +294,21 @@ fn over<T>(v: Option<Over<T>>, f: impl Fn(T) -> VARIANT) -> Result<VARIANT> {
     }
 }
 
+/// An attribute the application may leave unknown: not supported where it
+/// does.
+fn known<T: Into<VARIANT>>(v: Option<Over<Option<T>>>) -> Result<VARIANT> {
+    match v {
+        Some(Over::Single(Some(v))) => Ok(v.into()),
+        Some(Over::Mixed) => mixed(),
+        _ => reserved_not_supported(),
+    }
+}
+
+/// A colour as UI Automation gives it: a COLORREF, 0x00BBGGRR.
+fn colorref(c: Color) -> i32 {
+    i32::from(c.red) | (i32::from(c.green) << 8) | (i32::from(c.blue) << 16)
+}
+
 fn line_style(s: Option<LineStyle>) -> i32 {
     match s {
         None => TextDecorationLineStyle_None.0,
@@ -397,6 +414,8 @@ fn attribute(doc: &Indexed, id: UIA_TEXTATTRIBUTE_ID, r: (usize, usize)) -> Resu
         }
         UIA_IsSuperscriptAttributeId => over(doc.look(r, |l| l.superscript), |b| b.into()),
         UIA_IsSubscriptAttributeId => over(doc.look(r, |l| l.subscript), |b| b.into()),
+        UIA_ForegroundColorAttributeId => known(doc.look(r, |l| l.color.map(colorref))),
+        UIA_BackgroundColorAttributeId => known(doc.look(r, |l| l.background.map(colorref))),
         UIA_StyleIdAttributeId => over(doc.para(r, |p| p.style_id), |s| s.into()),
         UIA_StyleNameAttributeId => over(doc.para(r, |p| p.style_name.clone()), |n| {
             BSTR::from(n.as_str()).into()
@@ -410,6 +429,9 @@ fn attribute(doc: &Indexed, id: UIA_TEXTATTRIBUTE_ID, r: (usize, usize)) -> Resu
             }),
             |a| a.into(),
         ),
+        UIA_LineSpacingAttributeId => known(doc.para(r, |p| {
+            (!p.line_spacing.is_empty()).then(|| BSTR::from(p.line_spacing.as_str()))
+        })),
         UIA_AnnotationTypesAttributeId => {
             let ids: Vec<i32> = doc
                 .annotations(r)
@@ -473,7 +495,8 @@ fn attribute_unit(id: UIA_TEXTATTRIBUTE_ID) -> Unit {
     match id {
         UIA_StyleIdAttributeId
         | UIA_StyleNameAttributeId
-        | UIA_HorizontalTextAlignmentAttributeId => Unit::Paragraph,
+        | UIA_HorizontalTextAlignmentAttributeId
+        | UIA_LineSpacingAttributeId => Unit::Paragraph,
         _ => Unit::Format,
     }
 }
@@ -1026,6 +1049,18 @@ impl IRawElementProviderSimple_Impl for DocElement_Impl {
                 ObjectKind::List | ObjectKind::Table { .. } => VARIANT::default(),
             },
             UIA_IsKeyboardFocusablePropertyId => matches!(o.kind, ObjectKind::Link { .. }).into(),
+            // A list item's place in its list ("2 of 3"), and so the list's size.
+            UIA_PositionInSetPropertyId if o.kind == ObjectKind::ListItem => {
+                let at = self.path.last().map_or(0, |i| i + 1);
+                i32::try_from(at).unwrap_or(i32::MAX).into()
+            }
+            UIA_SizeOfSetPropertyId if o.kind == ObjectKind::ListItem => {
+                let n = doc.children(&self.parent()).len();
+                i32::try_from(n).unwrap_or(i32::MAX).into()
+            }
+            // Lists in the text aren't nested: every item is at the first level (JAWS reads a
+            // place in a list without a level as "level -1").
+            UIA_LevelPropertyId if o.kind == ObjectKind::ListItem => 1.into(),
             UIA_IsEnabledPropertyId
             | UIA_IsContentElementPropertyId
             | UIA_IsControlElementPropertyId => true.into(),
@@ -1192,4 +1227,90 @@ impl ITableItemProvider_Impl for DocElement_Impl {
 /// Whether a node is a document described as text.
 pub(crate) fn is_document(node: &NodeRef) -> bool {
     node.data().text_document().is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use accesskit::text_document::{Look, ParaKind};
+    use accesskit::{TextDocument, TextDocumentRef};
+
+    fn doc() -> Indexed {
+        // "Red\r" on white, "Plain\r" with colours unknown.
+        let kind = |line_spacing: &str| ParaKind {
+            style_id: StyleId_Normal.0,
+            style_name: "Normal".into(),
+            align: Align::Left,
+            line_spacing: line_spacing.into(),
+        };
+        let look = |color, background| Look {
+            font: "Aptos".into(),
+            size: 12.0,
+            weight: 400,
+            italic: false,
+            underline: None,
+            strike: None,
+            superscript: false,
+            subscript: false,
+            color,
+            background,
+        };
+        let rgb = |red, green, blue| Color {
+            red,
+            green,
+            blue,
+            alpha: 255,
+        };
+        Indexed::new(TextDocumentRef::from(TextDocument {
+            text: "Red\rPlain\r".encode_utf16().collect(),
+            paragraphs: vec![(0, kind("1.15")), (4, kind(""))],
+            lines: vec![0, 4],
+            pages: vec![0],
+            words: vec![4],
+            looks: vec![
+                (0, look(Some(rgb(255, 0, 0)), Some(rgb(255, 255, 255)))),
+                (4, look(None, None)),
+            ],
+            ..Default::default()
+        }))
+    }
+
+    fn not_supported(v: &VARIANT) -> bool {
+        let unknown = IUnknown::try_from(v).ok();
+        unknown.is_some() && unknown == unsafe { UiaGetReservedNotSupportedValue() }.ok()
+    }
+
+    fn mixed(v: &VARIANT) -> bool {
+        let unknown = IUnknown::try_from(v).ok();
+        unknown.is_some() && unknown == unsafe { UiaGetReservedMixedAttributeValue() }.ok()
+    }
+
+    #[test]
+    fn colours_are_colorrefs_where_known() {
+        let d = doc();
+        let fg = attribute(&d, UIA_ForegroundColorAttributeId, (0, 3)).unwrap();
+        assert_eq!(i32::try_from(&fg).unwrap(), 0x0000FF);
+        let bg = attribute(&d, UIA_BackgroundColorAttributeId, (0, 3)).unwrap();
+        assert_eq!(i32::try_from(&bg).unwrap(), 0xFFFFFF);
+        let plain = attribute(&d, UIA_ForegroundColorAttributeId, (4, 9)).unwrap();
+        assert!(not_supported(&plain));
+        let both = attribute(&d, UIA_ForegroundColorAttributeId, (0, 9)).unwrap();
+        assert!(mixed(&both));
+        // FindAttribute finds the red text.
+        let red = VARIANT::from(0x0000FF);
+        assert_eq!(
+            find_attribute(&d, UIA_ForegroundColorAttributeId, &red, (0, 10), false),
+            Some((0, 4))
+        );
+    }
+
+    #[test]
+    fn line_spacing_is_the_applications_text() {
+        let d = doc();
+        let v = attribute(&d, UIA_LineSpacingAttributeId, (1, 1)).unwrap();
+        assert_eq!(text_of(&v).as_deref(), Some("1.15"));
+        let unknown = attribute(&d, UIA_LineSpacingAttributeId, (5, 5)).unwrap();
+        assert!(not_supported(&unknown));
+        assert_eq!(attribute_unit(UIA_LineSpacingAttributeId), Unit::Paragraph);
+    }
 }
