@@ -10,7 +10,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, atomic::AtomicBool};
 use windows::core::ComObject;
 
-use crate::{node::PlatformNode, util::*, window_handle::WindowHandle};
+use crate::{document::Indexed, node::PlatformNode, util::*, window_handle::WindowHandle};
 
 pub(crate) trait ActionHandlerNoMut {
     fn do_action(&self, request: ActionRequest);
@@ -36,6 +36,8 @@ pub(crate) struct Context {
     pub(crate) action_handler: Arc<dyn ActionHandlerNoMut + Send + Sync>,
     pub(crate) is_placeholder: AtomicBool,
     platform_nodes: Mutex<HashMap<FullNodeId, ComObject<PlatformNode>>>,
+    /// The documents described as text, with their units worked out.
+    documents: Mutex<HashMap<FullNodeId, Arc<Indexed>>>,
 }
 
 impl Debug for Context {
@@ -62,6 +64,7 @@ impl Context {
             action_handler,
             is_placeholder: AtomicBool::new(is_placeholder),
             platform_nodes: Mutex::new(HashMap::new()),
+            documents: Mutex::new(HashMap::new()),
         })
     }
 
@@ -89,6 +92,23 @@ impl Context {
         let result = PlatformNode::new(self, id);
         platform_nodes.insert(id, result.clone());
         result
+    }
+
+    /// A node's document with its units worked out, once per document.
+    pub(crate) fn indexed(
+        &self,
+        id: FullNodeId,
+        current: &accesskit::TextDocumentRef,
+    ) -> Arc<Indexed> {
+        let mut documents = self.documents.lock().unwrap();
+        if let Some(indexed) = documents.get(&id) {
+            if Arc::ptr_eq(&indexed.doc.0, &current.0) {
+                return indexed.clone();
+            }
+        }
+        let indexed = Arc::new(Indexed::new(current.clone()));
+        documents.insert(id, indexed.clone());
+        indexed
     }
 
     pub(crate) fn remove_platform_node(&self, id: FullNodeId) {

@@ -270,6 +270,24 @@ impl TreeChangeHandler for AdapterChangeHandler<'_> {
         if old_node.raw_value() != new_node.raw_value() {
             self.insert_text_change_if_needed(new_node);
         }
+        // A document described as text: its text changed.
+        if let (Some(old), Some(new)) = (
+            old_node.data().text_document(),
+            new_node.data().text_document(),
+        ) {
+            if old.text != new.text && !self.text_changed.contains(&new_node.id()) {
+                let platform_node = self.context.get_or_create_platform_node(new_node.id());
+                let element: IRawElementProviderSimple = platform_node.into_interface();
+                self.queue.insert(
+                    0,
+                    QueuedEvent::Simple {
+                        element,
+                        event_id: UIA_Text_TextChangedEventId,
+                    },
+                );
+                self.text_changed.insert(new_node.id());
+            }
+        }
         let old_node_was_filtered_out = filter(old_node) != FilterResult::Include;
         if filter(new_node) != FilterResult::Include {
             if !old_node_was_filtered_out {

@@ -316,6 +316,16 @@ impl Clone for PlatformRange {
 // implementations. We assume that AccessKit is the only UIA provider
 // within this process. This seems a safe assumption for most AccessKit users.
 
+/// The other range of a call, if it is one of ours (and not a range of a
+/// document described as text).
+fn platform_range<'a>(other: &'a Ref<ITextRangeProvider>) -> Result<&'a PlatformRange> {
+    let other = required_param(other)?;
+    if crate::document::is_document_range(other) {
+        return Err(invalid_arg());
+    }
+    Ok(unsafe { other.as_impl() })
+}
+
 #[allow(non_snake_case)]
 impl ITextRangeProvider_Impl for PlatformRange_Impl {
     fn Clone(&self) -> Result<ITextRangeProvider> {
@@ -323,7 +333,7 @@ impl ITextRangeProvider_Impl for PlatformRange_Impl {
     }
 
     fn Compare(&self, other: Ref<ITextRangeProvider>) -> Result<BOOL> {
-        let other = unsafe { required_param(&other)?.as_impl() };
+        let other = platform_range(&other)?;
         Ok((self.context.ptr_eq(&other.context)
             && *self.state.read().unwrap() == *other.state.read().unwrap())
         .into())
@@ -335,7 +345,7 @@ impl ITextRangeProvider_Impl for PlatformRange_Impl {
         other: Ref<ITextRangeProvider>,
         other_endpoint: TextPatternRangeEndpoint,
     ) -> Result<i32> {
-        let other = unsafe { required_param(&other)?.as_impl() };
+        let other = platform_range(&other)?;
         if std::ptr::eq(other as *const _, &self.this as *const _) {
             // Comparing endpoints within the same range can be done
             // safely without upgrading the range. This allows ATs
@@ -572,7 +582,7 @@ impl ITextRangeProvider_Impl for PlatformRange_Impl {
         other: Ref<ITextRangeProvider>,
         other_endpoint: TextPatternRangeEndpoint,
     ) -> Result<()> {
-        let other = unsafe { required_param(&other)?.as_impl() };
+        let other = platform_range(&other)?;
         self.require_same_context(other)?;
         // We have to obtain the tree state and ranges manually to avoid
         // lifetime issues, and work with the two locks in a specific order

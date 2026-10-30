@@ -16,6 +16,11 @@ rust-version.workspace = true
 default-target = "x86_64-pc-windows-msvc"
 targets = []
 
+[features]
+# Log the calls screen readers make on documents described as text to the
+# file named by `ACCESSKIT_DOC_LOG`.
+document-trace = []
+
 [dependencies]
 accesskit = { version = "0.25.1", path = "../../accesskit" }
 accesskit_consumer = { version = "0.39.1", path = "../../accesskit_consumer" }

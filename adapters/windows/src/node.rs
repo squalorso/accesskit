@@ -37,7 +37,7 @@ use crate::{
 
 const RUNTIME_ID_SIZE: usize = 5;
 
-fn runtime_id_from_node_id(id: FullNodeId) -> [i32; RUNTIME_ID_SIZE] {
+pub(crate) fn runtime_id_from_node_id(id: FullNodeId) -> [i32; RUNTIME_ID_SIZE] {
     static_assertions::assert_eq_size!(FullNodeId, u128);
     let id: u128 = id.into();
     [
@@ -708,7 +708,7 @@ impl NodeWrapper<'_> {
     }
 
     fn is_text_pattern_supported(&self) -> bool {
-        self.node.supports_text_ranges()
+        self.node.supports_text_ranges() || crate::document::is_document(self.node)
     }
 
     fn is_expand_collapse_pattern_supported(&self) -> bool {
@@ -999,6 +999,14 @@ impl PlatformNode {
         })
     }
 
+    /// The node as a document described as text, if it is one.
+    fn document(&self) -> Result<Option<crate::document::Doc>> {
+        self.resolve(|node| {
+            Ok(crate::document::is_document(&node)
+                .then(|| crate::document::Doc::new(self.context.clone(), node.id())))
+        })
+    }
+
     fn is_root(&self, state: &TreeState) -> bool {
         self.node_id.is_some_and(|id| id == state.root_id())
     }
@@ -1011,6 +1019,13 @@ impl IRawElementProviderSimple_Impl for PlatformNode_Impl {
     }
 
     fn GetPatternProvider(&self, pattern_id: UIA_PATTERN_ID) -> Result<IUnknown> {
+        // A document described as text answers with its own text pattern.
+        if matches!(pattern_id, UIA_TextPatternId | UIA_TextPattern2Id) {
+            if let Some(doc) = self.document()? {
+                let text: ITextProvider = crate::document::DocText::new(doc).into();
+                return text.cast();
+            }
+        }
         self.pattern_provider(pattern_id)
     }
 
@@ -1072,6 +1087,19 @@ impl IRawElementProviderSimple_Impl for PlatformNode_Impl {
 #[allow(non_snake_case)]
 impl IRawElementProviderFragment_Impl for PlatformNode_Impl {
     fn Navigate(&self, direction: NavigateDirection) -> Result<IRawElementProviderFragment> {
+        // A document described as text has the elements in its text as children.
+        if matches!(
+            direction,
+            NavigateDirection_FirstChild | NavigateDirection_LastChild
+        ) {
+            if let Some(doc) = self.document()? {
+                if let Some(child) =
+                    crate::document::child(&doc, direction == NavigateDirection_LastChild)?
+                {
+                    return Ok(child);
+                }
+            }
+        }
         self.resolve_with_context(|node, context| {
             let result = match direction {
                 NavigateDirection_Parent => node.filtered_parent(&filter_with_root_exception),
