@@ -34,6 +34,9 @@ pub use uuid::Uuid;
 mod geometry;
 pub use geometry::{Affine, Point, Rect, Size, Vec2};
 
+pub mod text_document;
+pub use text_document::{TextDocument, TextDocumentRef};
+
 /// The type of an accessibility node.
 ///
 /// The majority of these roles come from the ARIA specification. Reference
@@ -883,6 +886,7 @@ enum PropertyValue {
     TextSelection(Box<TextSelection>),
     CustomActionVec(Vec<CustomAction>),
     TreeId(TreeId),
+    TextDocument(TextDocumentRef),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -978,6 +982,7 @@ enum PropertyId {
     // CoordVec
     CharacterPositions,
     CharacterWidths,
+    PageBounds,
 
     // bool
     Expanded,
@@ -1003,6 +1008,7 @@ enum PropertyId {
     TextSelection,
     CustomActions,
     TreeId,
+    TextDocument,
 
     // This MUST be last.
     Unset,
@@ -1040,6 +1046,7 @@ impl Clone for PropertyValue {
             Self::TextSelection(v) => Self::TextSelection(v.clone()),
             Self::CustomActionVec(v) => Self::CustomActionVec(v.clone()),
             Self::TreeId(v) => Self::TreeId(*v),
+            Self::TextDocument(v) => Self::TextDocument(v.clone()),
         }
     }
 
@@ -1978,7 +1985,8 @@ option_ref_type_getters! {
     (get_affine_property, Affine, Affine),
     (get_string_property, str, String),
     (get_coord_vec_property, [f32], CoordVec),
-    (get_text_selection_property, TextSelection, TextSelection)
+    (get_text_selection_property, TextSelection, TextSelection),
+    (get_text_document_property, TextDocumentRef, TextDocument)
 }
 
 slice_type_getters! {
@@ -2002,7 +2010,8 @@ owned_type_setters! {
     (set_string_property, String, String),
     (set_length_vec_property, Vec<u8>, LengthVec),
     (set_coord_vec_property, Vec<f32>, CoordVec),
-    (set_text_selection_property, Box<TextSelection>, TextSelection)
+    (set_text_selection_property, Box<TextSelection>, TextSelection),
+    (set_text_document_property, TextDocumentRef, TextDocument)
 }
 
 copy_type_setters! {
@@ -2421,7 +2430,15 @@ coord_vec_property_methods! {
     ///
     /// [`text_direction`]: Node::text_direction
     /// [`character_lengths`]: Node::character_lengths
-    (CharacterWidths, character_widths, set_character_widths, clear_character_widths)
+    (CharacterWidths, character_widths, set_character_widths, clear_character_widths),
+
+    /// For a node with a [`text_document`]: each page's rectangle in this
+    /// node's coordinate space and how many of those units one page unit is,
+    /// five numbers per page (left, top, right, bottom, scale). A
+    /// [`LineBox`](crate::text_document::LineBox) is in page units.
+    ///
+    /// [`text_document`]: Node::text_document
+    (PageBounds, page_bounds, set_page_bounds, clear_page_bounds)
 }
 
 bool_property_methods! {
@@ -2542,11 +2559,22 @@ property_methods! {
     ///
     /// Removing a graft node or clearing this property removes its subtree,
     /// unless a new graft node is provided in the same update.
-    (TreeId, tree_id, get_tree_id_property, Option<TreeId>, set_tree_id, set_tree_id_property, TreeId, clear_tree_id)
+    (TreeId, tree_id, get_tree_id_property, Option<TreeId>, set_tree_id, set_tree_id_property, TreeId, clear_tree_id),
+
+    /// The whole text of a document too long to describe node by node, with
+    /// its units, formatting, errors, elements and lines: see
+    /// [`text_document`](crate::text_document). A node with it is read as one
+    /// text by platform adapters that support it; its [`text_selection`]
+    /// positions are offsets into [`TextDocument::text`] with this node as
+    /// their node, and [`page_bounds`] places its lines.
+    ///
+    /// [`text_selection`]: Node::text_selection
+    /// [`page_bounds`]: Node::page_bounds
+    (TextDocument, text_document, get_text_document_property, Option<&TextDocumentRef>, set_text_document, set_text_document_property, impl Into<TextDocumentRef>, clear_text_document)
 }
 
 impl Node {
-    option_properties_debug_method! { debug_option_properties, [transform, bounds, text_selection, tree_id,] }
+    option_properties_debug_method! { debug_option_properties, [transform, bounds, text_selection, tree_id, text_document,] }
 }
 
 #[cfg(test)]
@@ -2863,7 +2891,8 @@ impl Serialize for Properties {
                 Rect,
                 TextSelection,
                 CustomActionVec,
-                TreeId
+                TreeId,
+                TextDocument
             });
         }
         map.end()
@@ -2975,7 +3004,8 @@ impl<'de> Visitor<'de> for PropertiesVisitor {
                 },
                 CoordVec {
                     CharacterPositions,
-                    CharacterWidths
+                    CharacterWidths,
+                    PageBounds
                 },
                 Bool {
                     Expanded,
@@ -2997,7 +3027,8 @@ impl<'de> Visitor<'de> for PropertiesVisitor {
                 Rect { Bounds },
                 TextSelection { TextSelection },
                 CustomActionVec { CustomActions },
-                TreeId { TreeId }
+                TreeId { TreeId },
+                TextDocument { TextDocument }
             });
         }
 
@@ -3128,7 +3159,8 @@ impl JsonSchema for Properties {
             },
             Vec<f32> {
                 CharacterPositions,
-                CharacterWidths
+                CharacterWidths,
+                PageBounds
             },
             bool {
                 Expanded,
