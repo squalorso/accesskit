@@ -27,7 +27,7 @@ use windows::{
     core::*,
 };
 
-use crate::{context::Context, node::runtime_id_from_node_id, util::*};
+use crate::{context::Context, filters::filter, node::runtime_id_from_node_id, util::*};
 pub(crate) use units::Indexed;
 use units::{Over, Unit};
 
@@ -173,6 +173,18 @@ impl Doc {
             .context()?
             .get_or_create_platform_node(self.node)
             .into_interface())
+    }
+
+    /// The node's first own child, which comes after the elements in its text.
+    fn first_own_child(&self) -> Result<Option<IRawElementProviderFragment>> {
+        let context = self.context()?;
+        let tree = context.read_tree();
+        let child = tree
+            .state()
+            .node_by_id(self.node)
+            .and_then(|node| node.filtered_children(&filter).next().map(|c| c.id()));
+        drop(tree);
+        Ok(child.map(|id| context.get_or_create_platform_node(id).into_interface()))
     }
 
     fn root(&self) -> Result<IRawElementProviderFragmentRoot> {
@@ -1089,6 +1101,7 @@ impl IRawElementProviderFragment_Impl for DocElement_Impl {
     fn Navigate(&self, direction: NavigateDirection) -> Result<IRawElementProviderFragment> {
         let doc = self.doc.doc()?;
         let parent = self.parent();
+        let top = parent.is_empty();
         let siblings = doc.children(&parent).len();
         let here = self.path.last().copied().unwrap_or(0);
         let kids = doc.children(&self.path).len();
@@ -1112,6 +1125,10 @@ impl IRawElementProviderFragment_Impl for DocElement_Impl {
         );
         match to {
             Some(p) => fragment(&self.doc, p),
+            // After the text's last element come the document node's own children.
+            None if direction == NavigateDirection_NextSibling && top => {
+                self.doc.first_own_child()?.ok_or_else(Error::empty)
+            }
             None => Err(Error::empty()),
         }
     }

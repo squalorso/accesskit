@@ -54,6 +54,9 @@ the way Microsoft Word does:
   alternative text, and sections as panes without a name, numbered the same
   way. A pane, not a group: JAWS reads a UI Automation group as a group box
   and said "group" on every line inside one; NVDA treats both as layout.
+- The node's own children (a menu the application opens over the page, a
+  toolbar) come after those elements, so they stay in the tree: the document's
+  last child, and the next sibling of its last element.
 - `Select` on a range is sent to the application as `SetTextSelection` on the
   node.
 - A change to the document's text raises `TextChanged`.

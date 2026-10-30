@@ -1007,6 +1007,24 @@ impl PlatformNode {
         })
     }
 
+    fn has_filtered_children(&self) -> Result<bool> {
+        self.resolve(|node| Ok(node.filtered_children(&filter).next().is_some()))
+    }
+
+    /// The document described as text whose first own child this node is: the node comes
+    /// after the elements in the document's text.
+    fn document_before(&self) -> Result<Option<crate::document::Doc>> {
+        self.resolve(|node| {
+            if node.preceding_filtered_siblings(&filter).next().is_some() {
+                return Ok(None);
+            }
+            Ok(node
+                .filtered_parent(&filter_with_root_exception)
+                .filter(|parent| crate::document::is_document(parent))
+                .map(|parent| crate::document::Doc::new(self.context.clone(), parent.id())))
+        })
+    }
+
     fn is_root(&self, state: &TreeState) -> bool {
         self.node_id.is_some_and(|id| id == state.root_id())
     }
@@ -1087,16 +1105,29 @@ impl IRawElementProviderSimple_Impl for PlatformNode_Impl {
 #[allow(non_snake_case)]
 impl IRawElementProviderFragment_Impl for PlatformNode_Impl {
     fn Navigate(&self, direction: NavigateDirection) -> Result<IRawElementProviderFragment> {
-        // A document described as text has the elements in its text as children.
+        // A document described as text has the elements in its text as children, then the
+        // node's own children (a menu the application opens over the page, for example).
         if matches!(
             direction,
             NavigateDirection_FirstChild | NavigateDirection_LastChild
         ) {
             if let Some(doc) = self.document()? {
-                if let Some(child) =
-                    crate::document::child(&doc, direction == NavigateDirection_LastChild)?
-                {
-                    return Ok(child);
+                let element = if direction == NavigateDirection_FirstChild {
+                    crate::document::child(&doc, false)?
+                } else if self.has_filtered_children()? {
+                    None
+                } else {
+                    crate::document::child(&doc, true)?
+                };
+                if let Some(element) = element {
+                    return Ok(element);
+                }
+            }
+        }
+        if direction == NavigateDirection_PreviousSibling {
+            if let Some(doc) = self.document_before()? {
+                if let Some(element) = crate::document::child(&doc, true)? {
+                    return Ok(element);
                 }
             }
         }

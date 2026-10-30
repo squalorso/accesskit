@@ -19,6 +19,7 @@ const WINDOW_TITLE: &str = "Document test";
 
 const WINDOW_ID: NodeId = NodeId(0);
 const DOCUMENT_ID: NodeId = NodeId(1);
+const MENU_ID: NodeId = NodeId(2);
 
 const TEXT: &str = "Title\rOne two\r\u{2022} A\r\u{2022} B\r";
 
@@ -36,6 +37,10 @@ fn get_initial_state() -> TreeUpdate {
     root.set_children(vec![DOCUMENT_ID]);
     let mut document = Node::new(Role::Document);
     document.set_label("Document");
+    // A menu the application opens over the page, under the document's node.
+    document.set_children(vec![MENU_ID]);
+    let mut menu = Node::new(Role::Menu);
+    menu.set_label("Context menu");
     document.set_text_document(TextDocument {
         text: TEXT.encode_utf16().collect(),
         paragraphs: vec![
@@ -100,7 +105,7 @@ fn get_initial_state() -> TreeUpdate {
         boxes: vec![],
     });
     TreeUpdate {
-        nodes: vec![(WINDOW_ID, root), (DOCUMENT_ID, document)],
+        nodes: vec![(WINDOW_ID, root), (DOCUMENT_ID, document), (MENU_ID, menu)],
         tree: Some(TreeInfo::new(WINDOW_ID)),
         tree_id: TreeId::ROOT,
         focus: DOCUMENT_ID,
@@ -252,6 +257,32 @@ fn list_items_know_their_place() -> Result<()> {
         assert_eq!(place(&first)?, (1, 2));
         let last = unsafe { walker.GetLastChildElement(&list) }?;
         assert_eq!(place(&last)?, (2, 2));
+        Ok(())
+    })
+}
+
+#[test]
+fn own_children_come_after_the_text_elements() -> Result<()> {
+    // The document node's own children (here a context menu) stay reachable after the
+    // elements in its text: without them a screen reader never finds the menu.
+    scope(|s| {
+        let document = document(s)?;
+        let walker = unsafe { s.uia.RawViewWalker() }?;
+        let menu = unsafe { walker.GetLastChildElement(&document) }?;
+        assert_eq!(unsafe { menu.CurrentControlType() }?, UIA_MenuControlTypeId);
+        assert_eq!(unsafe { menu.CurrentName() }?.to_string(), "Context menu");
+        let second = unsafe { walker.GetPreviousSiblingElement(&menu) }?;
+        assert_eq!(
+            unsafe { second.CurrentControlType() }?,
+            UIA_PaneControlTypeId
+        );
+        assert_eq!(place(&second)?, (2, 2));
+        let first = unsafe { walker.GetFirstChildElement(&document) }?;
+        let next = unsafe { walker.GetNextSiblingElement(&first) }?;
+        let after = unsafe { walker.GetNextSiblingElement(&next) }?;
+        assert!(unsafe { s.uia.CompareElements(&after, &menu) }?.as_bool());
+        let parent = unsafe { walker.GetParentElement(&menu) }?;
+        assert!(unsafe { s.uia.CompareElements(&parent, &document) }?.as_bool());
         Ok(())
     })
 }
