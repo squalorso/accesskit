@@ -19,8 +19,8 @@ this branch replaces those crates.
   spacing, the formatting of each stretch of text (with its colours on
   screen), spelling and grammar errors, the
   elements inside the text (links, lists and their items, tables and their
-  cells, images with their alternative text) and where each line sits on its
-  page.
+  cells, images with their alternative text, sections around their text) and
+  where each line sits on its page.
 - `Node::text_document` carries it as a shared `TextDocumentRef`, so an
   application builds it once per change and comparing two updates is cheap.
 - `Node::page_bounds` places each page in the node's coordinate space.
@@ -49,9 +49,11 @@ the way Microsoft Word does:
 - The elements inside the text are UI Automation elements under the document
   node: hyperlinks, lists and list items (with their place in the list,
   `PositionInSet` and `SizeOfSet`, at `Level` 1: the lists aren't nested),
-  tables with `Grid` and `Table`
-  patterns, cells with `GridItem`, `TableItem` and a text pattern over their
-  own text, and images named by their alternative text.
+  tables with `Grid` and `Table` patterns, cells with `GridItem`,
+  `TableItem` and a text pattern over their own text, images named by their
+  alternative text, and sections as panes without a name, numbered the same
+  way. A pane, not a group: JAWS reads a UI Automation group as a group box
+  and said "group" on every line inside one; NVDA treats both as layout.
 - `Select` on a range is sent to the application as `SetTextSelection` on the
   node.
 - A change to the document's text raises `TextChanged`.
@@ -71,4 +73,4 @@ they read them.
 - `tests::document`: a window with a text document read through the UI
   Automation client: the whole text, `IsReadOnly` false, the heading's
   `StyleId`, the link as a hyperlink element, each list item's place in its
-  list.
+  list, each section as a numbered pane around its text.

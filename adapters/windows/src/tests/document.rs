@@ -63,29 +63,38 @@ fn get_initial_state() -> TreeUpdate {
             },
         )],
         annotations: vec![],
+        // Two sections: the heading and the link, then the list.
         objects: vec![
             Object {
-                kind: ObjectKind::Link {
-                    url: "https://example.com/".into(),
-                },
-                range: 10..13,
-                children: vec![],
+                kind: ObjectKind::Section,
+                range: 0..14,
+                children: vec![Object {
+                    kind: ObjectKind::Link {
+                        url: "https://example.com/".into(),
+                    },
+                    range: 10..13,
+                    children: vec![],
+                }],
             },
             Object {
-                kind: ObjectKind::List,
+                kind: ObjectKind::Section,
                 range: 14..22,
-                children: vec![
-                    Object {
-                        kind: ObjectKind::ListItem,
-                        range: 14..18,
-                        children: vec![],
-                    },
-                    Object {
-                        kind: ObjectKind::ListItem,
-                        range: 18..22,
-                        children: vec![],
-                    },
-                ],
+                children: vec![Object {
+                    kind: ObjectKind::List,
+                    range: 14..22,
+                    children: vec![
+                        Object {
+                            kind: ObjectKind::ListItem,
+                            range: 14..18,
+                            children: vec![],
+                        },
+                        Object {
+                            kind: ObjectKind::ListItem,
+                            range: 18..22,
+                            children: vec![],
+                        },
+                    ],
+                }],
             },
         ],
         boxes: vec![],
@@ -182,12 +191,20 @@ fn heading_style() -> Result<()> {
     })
 }
 
+/// An element's place among its siblings and their number.
+fn place(element: &IUIAutomationElement) -> Result<(i32, i32)> {
+    let at = unsafe { element.GetCurrentPropertyValue(UIA_PositionInSetPropertyId) }?;
+    let of = unsafe { element.GetCurrentPropertyValue(UIA_SizeOfSetPropertyId) }?;
+    Ok((i32::try_from(&at)?, i32::try_from(&of)?))
+}
+
 #[test]
 fn link_element() -> Result<()> {
     scope(|s| {
         let document = document(s)?;
         let walker = unsafe { s.uia.RawViewWalker() }?;
-        let link = unsafe { walker.GetFirstChildElement(&document) }?;
+        let section = unsafe { walker.GetFirstChildElement(&document) }?;
+        let link = unsafe { walker.GetFirstChildElement(&section) }?;
         assert_eq!(
             unsafe { link.CurrentControlType() }?,
             UIA_HyperlinkControlTypeId
@@ -198,18 +215,39 @@ fn link_element() -> Result<()> {
 }
 
 #[test]
+fn sections_are_numbered_panes() -> Result<()> {
+    scope(|s| {
+        let document = document(s)?;
+        let walker = unsafe { s.uia.RawViewWalker() }?;
+        let first = unsafe { walker.GetFirstChildElement(&document) }?;
+        let second = unsafe { walker.GetNextSiblingElement(&first) }?;
+        for (section, at) in [(&first, 1), (&second, 2)] {
+            assert_eq!(
+                unsafe { section.CurrentControlType() }?,
+                UIA_PaneControlTypeId
+            );
+            assert_eq!(unsafe { section.CurrentName() }?.to_string(), "");
+            assert_eq!(place(section)?, (at, 2));
+        }
+        // A position inside the list is inside the second section.
+        let pattern: IUIAutomationTextPattern =
+            unsafe { document.GetCurrentPatternAs(UIA_TextPatternId) }?;
+        let range = unsafe { pattern.RangeFromChild(&second) }?;
+        let text = unsafe { range.GetText(-1) }?.to_string();
+        assert_eq!(text, "\u{2022} A\r\u{2022} B\r");
+        Ok(())
+    })
+}
+
+#[test]
 fn list_items_know_their_place() -> Result<()> {
     scope(|s| {
         let document = document(s)?;
         let walker = unsafe { s.uia.RawViewWalker() }?;
-        let link = unsafe { walker.GetFirstChildElement(&document) }?;
-        let list = unsafe { walker.GetNextSiblingElement(&link) }?;
+        let first = unsafe { walker.GetFirstChildElement(&document) }?;
+        let second = unsafe { walker.GetNextSiblingElement(&first) }?;
+        let list = unsafe { walker.GetFirstChildElement(&second) }?;
         assert_eq!(unsafe { list.CurrentControlType() }?, UIA_ListControlTypeId);
-        let place = |item: &IUIAutomationElement| -> Result<(i32, i32)> {
-            let at = unsafe { item.GetCurrentPropertyValue(UIA_PositionInSetPropertyId) }?;
-            let of = unsafe { item.GetCurrentPropertyValue(UIA_SizeOfSetPropertyId) }?;
-            Ok((i32::try_from(&at)?, i32::try_from(&of)?))
-        };
         let first = unsafe { walker.GetFirstChildElement(&list) }?;
         assert_eq!(place(&first)?, (1, 2));
         let last = unsafe { walker.GetLastChildElement(&list) }?;

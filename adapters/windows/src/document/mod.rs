@@ -974,6 +974,11 @@ impl DocElement {
     }
 }
 
+/// Elements that have a place among their siblings: list items and sections.
+fn numbered(kind: &ObjectKind) -> bool {
+    matches!(kind, ObjectKind::ListItem | ObjectKind::Section)
+}
+
 fn trimmed(text: &[u16]) -> String {
     String::from_utf16_lossy(text)
         .trim_end_matches(['\r', '\n', '\u{7}'])
@@ -1038,6 +1043,10 @@ impl IRawElementProviderSimple_Impl for DocElement_Impl {
                 ObjectKind::Table { .. } => UIA_TableControlTypeId,
                 ObjectKind::Cell { .. } => UIA_DataItemControlTypeId,
                 ObjectKind::Image { .. } => UIA_ImageControlTypeId,
+                // A pane without a name: structure that screen readers don't announce, and
+                // can number the section by its place. (A group would be read as a group box:
+                // JAWS said "group" on every line in it.)
+                ObjectKind::Section => UIA_PaneControlTypeId,
             }
             .0
             .into(),
@@ -1046,21 +1055,24 @@ impl IRawElementProviderSimple_Impl for DocElement_Impl {
                     BSTR::from(text().as_str()).into()
                 }
                 ObjectKind::Image { alt } => BSTR::from(alt.as_str()).into(),
-                ObjectKind::List | ObjectKind::Table { .. } => VARIANT::default(),
+                ObjectKind::List | ObjectKind::Table { .. } | ObjectKind::Section => {
+                    VARIANT::default()
+                }
             },
             UIA_IsKeyboardFocusablePropertyId => matches!(o.kind, ObjectKind::Link { .. }).into(),
-            // A list item's place in its list ("2 of 3"), and so the list's size.
-            UIA_PositionInSetPropertyId if o.kind == ObjectKind::ListItem => {
+            // A list item's place in its list ("2 of 3"), and so the list's size; a section's
+            // number and the number of sections.
+            UIA_PositionInSetPropertyId if numbered(&o.kind) => {
                 let at = self.path.last().map_or(0, |i| i + 1);
                 i32::try_from(at).unwrap_or(i32::MAX).into()
             }
-            UIA_SizeOfSetPropertyId if o.kind == ObjectKind::ListItem => {
+            UIA_SizeOfSetPropertyId if numbered(&o.kind) => {
                 let n = doc.children(&self.parent()).len();
                 i32::try_from(n).unwrap_or(i32::MAX).into()
             }
-            // Lists in the text aren't nested: every item is at the first level (JAWS reads a
-            // place in a list without a level as "level -1").
-            UIA_LevelPropertyId if o.kind == ObjectKind::ListItem => 1.into(),
+            // Lists in the text aren't nested, nor are sections: every one is at the first
+            // level (JAWS reads a place in a list without a level as "level -1").
+            UIA_LevelPropertyId if numbered(&o.kind) => 1.into(),
             UIA_IsEnabledPropertyId
             | UIA_IsContentElementPropertyId
             | UIA_IsControlElementPropertyId => true.into(),

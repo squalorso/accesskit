@@ -90,12 +90,26 @@ pub enum Annotation {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ObjectKind {
-    Link { url: String },
+    Link {
+        url: String,
+    },
     List,
     ListItem,
-    Table { rows: usize, cols: usize },
-    Cell { row: usize, col: usize },
-    Image { alt: String },
+    Table {
+        rows: usize,
+        cols: usize,
+    },
+    Cell {
+        row: usize,
+        col: usize,
+    },
+    Image {
+        alt: String,
+    },
+    /// A part of the document with its own page layout (a word processor's
+    /// section), around what it holds; numbered by its place among its
+    /// siblings.
+    Section,
 }
 
 /// An element inside the text: screen readers find links, lists and tables
